@@ -20,6 +20,7 @@ from lib import utils
 from lib.config import cfg, update_config_from_file
 from model.supernet_transformer import Vision_TransformerSuper
 
+import wandb
 
 def get_args_parser():
     parser = argparse.ArgumentParser('AutoFormer training and evaluation script', add_help=False)
@@ -224,6 +225,12 @@ def main(args):
                 dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
+        if utils.is_main_process():
+            yaml_file_name = args.cfg.split("/")[-1].split(".")[0]
+            run_name = f"Retrain_{yaml_file_name}_{args.seed}"
+            wandb.init(project='autoformer', config=args, name=run_name)
+
     else:
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
@@ -380,6 +387,9 @@ def main(args):
                      'epoch': epoch,
                      'n_parameters': n_parameters}
 
+        if utils.is_main_process():
+            wandb.log(log_stats)
+
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
@@ -388,10 +398,14 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
+    if utils.is_main_process():
+        wandb.finish()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('AutoFormer training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
+
+    # initialize wandb here
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
