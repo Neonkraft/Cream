@@ -58,6 +58,7 @@ SBATCH_SCRIPT="#!/bin/bash
 #SBATCH -e ${LOG_DIR}/%j.%x.%a.%N.err
 #SBATCH -J ${JOB_NAME}-%a
 #SBATCH -a ${ARRAY_RANGE}
+#SBATCH --exclude=dlcgpu35,dlcgpu28
 #SBATCH --mail-type=END,FAIL
 
 source ~/.bash_profile
