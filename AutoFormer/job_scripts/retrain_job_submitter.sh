@@ -52,7 +52,7 @@ CONFIG_FILE="./experiments/subnet/AutoFormer-T-${ALGORITHM}-${DATASET_PARAM}.yam
 SBATCH_SCRIPT="#!/bin/bash
 #SBATCH -p alldlc_gpu-rtx2080
 #SBATCH --gres=gpu:8
-#SBATCH -t 3-00:00:00
+#SBATCH -t 1-00:00:00
 #SBATCH -c 8
 #SBATCH -o ${LOG_DIR}/%j.%x.%a.%N.out
 #SBATCH -e ${LOG_DIR}/%j.%x.%a.%N.err
