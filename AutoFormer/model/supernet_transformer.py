@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from model.module.Linear_super import LinearSuper, WeightEntangledLoraLinear
-from model.module.layernorm_super import LayerNormSuper
+from model.module.layernorm_super import LayerNormSuper, WeightEntangledLayerNorm
 from model.module.multihead_super import AttentionSuper
 from model.module.qkv_super import WeightEntangledLoraQKV
 from model.module.embedding_super import PatchembedSuper
@@ -160,7 +160,7 @@ class Vision_TransformerSuper(nn.Module):
             x = blk(x) # (B, new_h * new_w + 1 , embed_dim)
         # print(time.time()-start_time)
         if self.pre_norm:
-            x = self.norm(x) # (B, new_h * new_w + 1 , embed_dim)
+            x = self.norm(x, self.embed_weights) # (B, new_h * new_w + 1 , embed_dim)
 
         if self.gp:
             return torch.mean(x[:, 1:] , dim=1)
@@ -295,7 +295,7 @@ class TransformerEncoderLayer(nn.Module):
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):
         assert before ^ after
         if after ^ self.normalize_before:
-            return layer_norm(x)
+            return layer_norm(x, self.embed_weights)
         else:
             return x
     def get_complexity(self, sequence_length):
@@ -354,11 +354,20 @@ if __name__ == "__main__":
         block.set_arch_weights(embed_weights, mlp_ratio_weights, n_heads_weights)
         attn_layer.set_arch_weights(embed_weights, n_heads_weights)
 
+        block.attn_layer_norm = WeightEntangledLayerNorm(block.attn_layer_norm, embed_choices)
+        block.ffn_layer_norm = WeightEntangledLayerNorm(block.ffn_layer_norm, embed_choices)
+
         # attn_layer.qkv.activate_lora(r=1)
         # attn_layer.proj.activate_lora(r=1)
 
         # block.fc1.activate_lora(r=1)
         # block.fc2.activate_lora(r=1)
+
+    if hasattr(model, 'norm'):
+        model.norm = WeightEntangledLayerNorm(model.norm, embed_choices)
+
+    model.embed_weights = embed_weights
+
 
     out = model(x)
 
