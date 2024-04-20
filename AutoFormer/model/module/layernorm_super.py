@@ -43,3 +43,38 @@ class LayerNormSuper(torch.nn.LayerNorm):
 
     def get_complexity(self, sequence_length):
         return sequence_length * self.sample_embed_dim
+
+
+class WeightEntangledLayerNorm(nn.Module):
+    def __init__(self, layernorm: nn.LayerNorm, in_feature_dims: list[int]):
+        super().__init__()
+        self.layernorm = layernorm
+        self.in_feature_dims = in_feature_dims
+
+    def _combine_weights(self, weight, in_feature_dims, alphas):
+        max_dim = weight.shape[0]
+        mixed_weight = 0 + weight
+
+        for in_dim, alpha in zip(in_feature_dims, alphas):
+            pad_width = max_dim - in_dim
+            sub_weight = weight[:in_dim]
+            sub_weight = F.pad(sub_weight, (0, pad_width), 'constant', 0)
+            mixed_weight += alpha * sub_weight
+
+        return mixed_weight
+
+    def _compute_combined_weight(self, weight, in_feature_dims, alphas):
+        return self._combine_weights(weight, in_feature_dims, alphas)
+
+    def _compute_combined_bias(self, bias, in_feature_dims, alphas):
+        if bias is None:
+            return None
+
+        return self._combine_weights(bias, in_feature_dims, alphas)
+
+    def forward(self, x, alphas):
+        mixed_weight = self._compute_combined_weight(self.layernorm.weight, self.in_feature_dims, alphas)
+        mixed_bias = self._compute_combined_bias(self.layernorm.bias, self.in_feature_dims, alphas)
+        out = F.layer_norm(x, (self.layernorm.weight.shape[0],), weight=mixed_weight, bias=mixed_bias, eps=self.layernorm.eps)
+
+        return out
