@@ -97,6 +97,11 @@ class AttentionSuper(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj_drop = nn.Dropout(proj_drop)
 
+
+    def set_arch_weights(self, embed_weights, n_heads_weights):
+        self.embed_weights = embed_weights
+        self.n_heads_weights = n_heads_weights
+
     def set_sample_config(self, sample_q_embed_dim=None, sample_num_heads=None, sample_in_embed_dim=None):
 
         self.sample_in_embed_dim = sample_in_embed_dim
@@ -132,7 +137,7 @@ class AttentionSuper(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.sample_num_heads, -1).permute(2, 0, 3, 1, 4)
+        qkv = self.qkv(x, self.embed_weights, self.n_heads_weights).reshape(B, N, 3, self.sample_num_heads, -1).permute(2, 0, 3, 1, 4) # (3, B, num_heads, N, 64)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
         attn = (q @ k.transpose(-2, -1)) * self.sample_scale
@@ -155,6 +160,6 @@ class AttentionSuper(nn.Module):
 
         if self.fc_scale:
             x = x * (self.super_embed_dim / self.sample_qk_embed_dim)
-        x = self.proj(x)
+        x = self.proj(x, self.embed_weights, self.embed_weights)
         x = self.proj_drop(x)
         return x
