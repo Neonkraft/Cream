@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+from model.module.lora_layers import LoraLinear
 
 class qkv_super(nn.Linear):
     def __init__(self, super_in_dim, super_out_dim, bias=True, uniform_=None, non_linear='linear', scale=False):
@@ -81,3 +82,75 @@ def sample_bias(bias, sample_out_dim):
     sample_bias = bias[:sample_out_dim]
 
     return sample_bias
+
+class WeightEntangledLoraQKV(nn.Module):
+    def __init__(self, qkv, in_feature_dims: list[int], n_head_choices: list[int]):
+        super().__init__()
+        self.qkv = LoraLinear(qkv)
+        self.in_feature_dims = in_feature_dims
+        self.n_head_choices = n_head_choices
+
+    def activate_lora(self, *args, **kwargs):
+        self.qkv.activate_lora(*args, **kwargs)
+
+    # def set_arch_weights(self, embed_weights, n_heads_weights):
+    #     self.embed_weight = embed_weights
+    #     self.n_heads_weight = n_heads_weights
+
+    def _compute_combined_weight(self, weight, in_feature_dims, n_head_choices, alphas, betas):
+        max_out_dim, max_in_dim = self.qkv.weight.shape[0], self.qkv.weight.shape[1]
+        arch_weight_matrix = torch.outer(alphas, betas)
+
+        mixed_weight = 0 + weight
+
+        for alpha_idx, in_dim in enumerate(in_feature_dims):
+            for beta_idx, n_heads in enumerate(n_head_choices):
+                out_dim = (64 * 3 * n_heads)
+                in_padding = max_in_dim - in_dim
+                out_padding = max_out_dim - out_dim
+
+                out_padding = 0 if out_padding < 0 else out_padding
+
+                sub_weight = self.qkv.weight[:out_dim, :in_dim]
+                sub_weight = F.pad(sub_weight, (0, in_padding, 0, out_padding), 'constant', 0)
+                mixed_weight += arch_weight_matrix[alpha_idx, beta_idx] * sub_weight
+
+        return mixed_weight
+
+    def _compute_combined_bias(self, bias, n_head_choices, betas):
+        if self.qkv.bias is None:
+            return None
+
+        max_out_dim = self.qkv.bias.shape[0]
+        mixed_bias = 0 + bias
+
+        for beta, n_heads in zip(betas, n_head_choices):
+            out_dim = (64 * 3 * n_heads)
+            out_padding = max_out_dim - out_dim
+            out_padding = 0 if out_padding < 0 else out_padding
+
+            sub_bias = self.qkv.bias[:out_dim]
+            sub_bias = F.pad(sub_bias, (0, out_padding), 'constant', 0)
+
+            mixed_bias += beta * sub_bias
+
+        return mixed_bias
+
+    def forward(self, x, alphas, betas):
+        mixed_weight = self._compute_combined_weight(self.qkv.weight, self.in_feature_dims, self.n_head_choices, alphas, betas)
+        mixed_bias = self._compute_combined_bias(self.qkv.bias, self.n_head_choices, betas)
+
+        out = self.qkv(x, mixed_weight, mixed_bias)
+
+        return out
+
+
+if __name__ == "__main__":
+    qkv = qkv_super(super_in_dim=240, super_out_dim=240*3)
+    qkv_lora = WeightEntangledLoraQKV(qkv, in_feature_dims=[24, 192, 240], n_head_choices=[1, 4])
+
+    alphas = F.softmax(torch.randn(3))
+    betas = F.softmax(torch.randn(2))
+    x = torch.randn(3, 100, 240)
+
+    out = qkv_lora(x, alphas, betas)
