@@ -1,9 +1,9 @@
-torch==1.12.1
+torch==2.0
 timm==0.3.2
 scikit-image
 ptflops
 easydict
 PyYAML
 pillow
-torchvision==0.13.1
+torchvision
 opencv-python
