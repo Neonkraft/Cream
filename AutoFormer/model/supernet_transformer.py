@@ -355,7 +355,37 @@ class TransformerEncoderLayer(nn.Module):
 def calc_dropout(dropout, sample_embed_dim, super_embed_dim):
     return dropout * 1.0 * sample_embed_dim / super_embed_dim
 
+def wrap_entangled_modules(model):
+    model.patch_embed_super = WeightEntangledPatchembed(model.patch_embed_super, embed_choices)
 
+    for block in model.blocks:
+        attn_layer = block.attn
+
+        attn_layer.qkv = WeightEntangledLoraQKV(attn_layer.qkv, embed_choices, n_heads_choices)
+        attn_layer.proj = WeightEntangledLoraLinear(attn_layer.proj, embed_choices, embed_choices)
+
+        mlp_dims = [int(max(embed_choices) * ratio) for ratio in mlp_ratio_choices]
+        block.fc1 = WeightEntangledLoraLinear(block.fc1, embed_choices, mlp_dims)
+        block.fc2 = WeightEntangledLoraLinear(block.fc2, mlp_dims, embed_choices)
+
+        # block.set_arch_weights(embed_dim_weights, mlp_ratio_weights, n_heads_weights)
+        # attn_layer.set_arch_weights(embed_dim_weights, n_heads_weights)
+
+        block.attn_layer_norm = WeightEntangledLayerNorm(block.attn_layer_norm, embed_choices)
+        block.ffn_layer_norm = WeightEntangledLayerNorm(block.ffn_layer_norm, embed_choices)
+
+        # attn_layer.qkv.activate_lora(r=4)
+        # attn_layer.proj.activate_lora(r=4)
+
+        # block.fc1.activate_lora(r=4)
+        # block.fc2.activate_lora(r=4)
+
+    if hasattr(model, 'norm'):
+        model.norm = WeightEntangledLayerNorm(model.norm, embed_choices)
+
+    model.head = WeightEntangledLoraLinear(model.head, embed_choices)
+
+    return model
 
 if __name__ == "__main__":
 
