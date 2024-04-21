@@ -96,16 +96,21 @@ class Vision_TransformerSuper(nn.Module):
         self.n_layers_choices = n_layers
 
     def set_arch_weights(self, embed_dim_weights, mlp_ratio_weights, n_heads_weights, n_layers_weights):
-        self.embed_dim_weights = embed_dim_weights
-        self.mlp_ratio_weights = mlp_ratio_weights
-        self.n_heads_weights = n_heads_weights
-        self.n_layers_weights = n_layers_weights
+        self.arch_weights = {
+            'embed_dim': embed_dim_weights,
+            'mlp_ratio': mlp_ratio_weights,
+            'num_heads': n_heads_weights,
+            'n_layers': n_layers_weights
+        }
+
+    def get_arch_parameters(self):
+        return [v for v in self.arch_weights.values()]
 
     def normalize_arch_weights(self):
-        self.embed_dim_alphas = F.softmax(self.embed_dim_weights, dim=-1)
-        self.mlp_ratio_alphas = F.softmax(self.mlp_ratio_weights, dim=-1)
-        self.n_heads_alphas = F.softmax(self.n_heads_weights, dim=-1)
-        self.n_layers_alphas = F.softmax(self.n_layers_weights, dim=-1)
+        self.embed_dim_alphas = F.softmax(self.arch_weights["embed_dim"], dim=-1)
+        self.mlp_ratio_alphas = F.softmax(self.arch_weights["mlp_ratio"], dim=-1)
+        self.n_heads_alphas = F.softmax(self.arch_weights["num_heads"], dim=-1)
+        self.n_layers_alphas = F.softmax(self.arch_weights["n_layers"], dim=-1)
 
         for idx, block in enumerate(self.blocks):
             block.set_normalized_arch_weights(self.embed_dim_alphas, self.mlp_ratio_alphas[idx], self.n_heads_alphas[idx])
