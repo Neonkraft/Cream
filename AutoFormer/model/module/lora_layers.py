@@ -44,11 +44,13 @@ class LoraLinear(nn.Linear, LoRALayer):
     def __init__(
         self,
         linear: nn.Linear,
+        merge_weights: bool = True,
         **kwargs
     ):
         nn.Linear.__init__(self, linear.in_features, linear.out_features, **kwargs)
         self.weight = linear.weight
         self.bias = linear.bias
+        self.merge_weights = merge_weights
 
         LoRALayer.__init__(self)
 
