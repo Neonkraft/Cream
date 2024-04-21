@@ -89,6 +89,21 @@ class Vision_TransformerSuper(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    def set_arch_choices(self, embed_dims, mlp_ratios, n_heads, n_layers):
+        self.embed_dim_choices = embed_dims
+        self.mlp_ratio_choices = mlp_ratios
+        self.n_heads_choices = n_heads
+        self.n_layers_choices = n_layers
+
+    def set_arch_weights(self, embed_dim_weights, mlp_ratio_weights, n_heads_weights, n_layers_weights):
+        self.embed_dim_weights = embed_dim_weights
+        self.mlp_ratio_weights = mlp_ratio_weights
+        self.n_heads_weights = n_heads_weights
+        self.n_layers_weights = n_layers_weights
+
+        for idx, block in enumerate(self.blocks):
+            block.set_arch_weights(embed_dim_weights, mlp_ratio_weights[idx], n_heads_weights[idx])
+
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'pos_embed', 'cls_token', 'rel_pos_embed'}
@@ -145,6 +160,14 @@ class Vision_TransformerSuper(nn.Module):
             total_flops +=  blk.get_complexity(sequence_length+1)
         total_flops += self.head.get_complexity(sequence_length+1)
         return total_flops
+
+    def compute_weighted_block_outputs(self, block_outs, block_weights):
+        x = 0
+        for out, weight in zip(block_outs, block_weights):
+            x = x + out * weight
+
+        return x
+
     def forward_features(self, x):
         B = x.shape[0] # (B, C, H, W)
         x = self.patch_embed_super(x, self.embed_dim_weights) # (B, new_h * new_w , embed_dim)
@@ -156,8 +179,15 @@ class Vision_TransformerSuper(nn.Module):
         x = F.dropout(x, p=self.sample_dropout, training=self.training) # (B, new_h * new_w + 1 , embed_dim)
 
         # start_time = time.time()
-        for blk in self.blocks:
+        blk_outs = []
+        for idx, blk in enumerate(self.blocks):
             x = blk(x) # (B, new_h * new_w + 1 , embed_dim)
+
+            if idx + 1 in self.n_layers_choices:
+                blk_outs.append(x)
+
+        x = self.compute_weighted_block_outputs(blk_outs, self.n_layers_weights)
+
         # print(time.time()-start_time)
         if self.pre_norm:
             x = self.norm(x, self.embed_dim_weights) # (B, new_h * new_w + 1 , embed_dim)
@@ -316,7 +346,7 @@ def calc_dropout(dropout, sample_embed_dim, super_embed_dim):
 
 if __name__ == "__main__":
 
-    depth = 12
+    depth = 14
     model = Vision_TransformerSuper(change_qkv=True, embed_dim=240, num_heads=4, depth=depth)
 
     sample_config = {
@@ -331,18 +361,21 @@ if __name__ == "__main__":
     embed_choices = [24, 192, 240]
     mlp_ratio_choices = [0.5, 3.5, 4]
     n_heads_choices = [1, 3, 4]
-
+    n_layer_choices = [1, 12, 14]
 
     embed_dim_weights = F.softmax(torch.randn(len(embed_choices)), dim=0)
-    n_heads_weights = F.softmax(torch.randn(len(n_heads_choices)), dim=0)
-    mlp_ratio_weights = F.softmax(torch.randn(len(mlp_ratio_choices)), dim=0)
+    mlp_ratio_weights = F.softmax(torch.randn(depth, len(mlp_ratio_choices)), dim=0)
+    n_heads_weights = F.softmax(torch.randn(depth, len(n_heads_choices)), dim=0)
+    n_layers_weights = F.softmax(torch.randn(len(n_layer_choices)), dim=0)
 
     x = torch.randn(2, 3, 224, 224)
 
     # out = model(x)
     ###### MODIFY SEARCH SPACE START ######
 
-    model.embed_dim_weights = embed_dim_weights
+    model.set_arch_choices(embed_choices, mlp_ratio_choices, n_heads_choices, n_layer_choices)
+    model.set_arch_weights(embed_dim_weights, mlp_ratio_weights, n_heads_weights, n_layers_weights)
+
     model.patch_embed_super = WeightEntangledPatchembed(model.patch_embed_super, embed_choices)
 
     for block in model.blocks:
@@ -355,17 +388,17 @@ if __name__ == "__main__":
         block.fc1 = WeightEntangledLoraLinear(block.fc1, embed_choices, mlp_dims)
         block.fc2 = WeightEntangledLoraLinear(block.fc2, mlp_dims, embed_choices)
 
-        block.set_arch_weights(embed_dim_weights, mlp_ratio_weights, n_heads_weights)
-        attn_layer.set_arch_weights(embed_dim_weights, n_heads_weights)
+        # block.set_arch_weights(embed_dim_weights, mlp_ratio_weights, n_heads_weights)
+        # attn_layer.set_arch_weights(embed_dim_weights, n_heads_weights)
 
         block.attn_layer_norm = WeightEntangledLayerNorm(block.attn_layer_norm, embed_choices)
         block.ffn_layer_norm = WeightEntangledLayerNorm(block.ffn_layer_norm, embed_choices)
 
-        attn_layer.qkv.activate_lora(r=4)
-        attn_layer.proj.activate_lora(r=4)
+        # attn_layer.qkv.activate_lora(r=4)
+        # attn_layer.proj.activate_lora(r=4)
 
-        block.fc1.activate_lora(r=4)
-        block.fc2.activate_lora(r=4)
+        # block.fc1.activate_lora(r=4)
+        # block.fc2.activate_lora(r=4)
 
     if hasattr(model, 'norm'):
         model.norm = WeightEntangledLayerNorm(model.norm, embed_choices)
