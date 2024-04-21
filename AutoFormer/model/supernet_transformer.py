@@ -215,6 +215,9 @@ class Vision_TransformerSuper(nn.Module):
         x = self.head(x, self.embed_dim_alphas) # (B, num_classes)
         return x
 
+    def _loss(self, x, target):
+        logits = self(x)
+        return self._criterion(logits, target)
 
 class TransformerEncoderLayer(nn.Module):
     """Encoder layer block.
@@ -355,7 +358,12 @@ class TransformerEncoderLayer(nn.Module):
 def calc_dropout(dropout, sample_embed_dim, super_embed_dim):
     return dropout * 1.0 * sample_embed_dim / super_embed_dim
 
-def wrap_entangled_modules(model):
+def wrap_entangled_modules(model, config_options):
+    embed_choices = config_options["embed_dim"]
+    mlp_ratio_choices = config_options["mlp_ratio"]
+    n_heads_choices = config_options["num_heads"]
+    n_layer_choices = config_options["layer_num"]
+
     model.patch_embed_super = WeightEntangledPatchembed(model.patch_embed_super, embed_choices)
 
     for block in model.blocks:
