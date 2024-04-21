@@ -92,6 +92,9 @@ parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RA
 
 args = parser.parse_args()
 
+# stall for a random amount of time to avoid multiple processes logging at the same time
+time.sleep(np.random.uniform(0, 5))
+
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
 utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
 
