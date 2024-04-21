@@ -47,3 +47,47 @@ class PatchembedSuper(nn.Module):
              total_flops += self.sampled_bias.size(0)
         total_flops += sequence_length * np.prod(self.sampled_weight.size())
         return total_flops
+
+class WeightEntangledPatchembed(nn.Module):
+    def __init__(self, patchembed: PatchembedSuper, embed_dims: list[int]):
+        super().__init__()
+        self.patchembed = patchembed
+        self.embed_dims = embed_dims
+
+    def _compute_mixed_weight(self, weight, embed_dims, alphas):
+        max_out_dim = weight.shape[0]
+        mixed_weight = 0 + weight
+
+        for embed_dim, alpha in zip(embed_dims, alphas):
+            pad_width = max_out_dim - embed_dim
+            sub_weight = weight[:embed_dim, ...]
+            sub_weight = F.pad(sub_weight, (0, 0, 0, 0, 0, 0, 0, pad_width), 'constant', 0)
+            mixed_weight += alpha * sub_weight
+
+        return mixed_weight
+
+    def _compute_mixed_bias(self, bias, embed_dims, alphas):
+        if bias is None:
+            return None
+
+        max_out_dim = bias.shape[0]
+        mixed_bias = 0 + bias
+
+        for embed_dim, alpha in zip(embed_dims, alphas):
+            pad_width = max_out_dim - embed_dim
+            sub_bias = bias[:embed_dim]
+            sub_bias = F.pad(sub_bias, (0, pad_width), 'constant', 0)
+            mixed_bias += alpha * sub_bias
+
+        return mixed_bias
+
+    def forward(self, x, alphas):
+        mixed_weight = self._compute_mixed_weight(self.patchembed.proj.weight, self.embed_dims, alphas)
+        mixed_bias = self._compute_mixed_bias(self.patchembed.proj.bias, self.embed_dims, alphas)
+
+        self.patchembed.sampled_weight = mixed_weight
+        self.patchembed.sampled_bias = mixed_bias
+
+        out = self.patchembed(x)
+
+        return out
