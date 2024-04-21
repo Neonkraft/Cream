@@ -115,6 +115,16 @@ class Vision_TransformerSuper(nn.Module):
         for idx, block in enumerate(self.blocks):
             block.set_normalized_arch_weights(self.embed_dim_alphas, self.mlp_ratio_alphas[idx], self.n_heads_alphas[idx])
 
+    def activate_lora(self, r=4):
+        for block in self.blocks:
+            attn_layer = block.attn
+
+            attn_layer.qkv.activate_lora(r=r)
+            attn_layer.proj.activate_lora(r=r)
+
+            block.fc1.activate_lora(r=r)
+            block.fc2.activate_lora(r=r)
+
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -267,7 +277,6 @@ class TransformerEncoderLayer(nn.Module):
 
         self.fc1 = LinearSuper(super_in_dim=self.super_embed_dim, super_out_dim=self.super_ffn_embed_dim_this_layer)
         self.fc2 = LinearSuper(super_in_dim=self.super_ffn_embed_dim_this_layer, super_out_dim=self.super_embed_dim)
-
 
     def set_normalized_arch_weights(self, embed_dim_weights, mlp_ratio_weights, n_heads_weights):
         self.embed_dim_alphas = embed_dim_weights

@@ -20,6 +20,7 @@ from architect import Architect
 DEBUG_MODE = False
 
 parser = argparse.ArgumentParser("cifar")
+parser.add_argument('--lora_rank', type=int, default=4, help='rank of lora layers')
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
@@ -29,6 +30,7 @@ parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight dec
 parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
+parser.add_argument('--warmup_epochs', type=int, default=2, help='num of warmup training epochs')
 parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
 parser.add_argument('--layers', type=int, default=8, help='total number of layers')
 parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
@@ -42,6 +44,7 @@ parser.add_argument('--train_portion', type=float, default=0.5, help='portion of
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+
 args = parser.parse_args()
 
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
@@ -175,11 +178,20 @@ def main():
   architect = Architect(model, args)
 
   for epoch in range(args.epochs):
+
+    if epoch == args.warmup_epochs:
+      logging.info('warmup done')
+      model.activate_lora(args.lora_rank)
+      lora_params = [p for name, p in model.named_parameters() if "lora_" in name]
+      optimizer.add_param_group({'params': lora_params, 'lr': args.learning_rate, 'weight_decay': args.weight_decay})
+      logging.info(f"lora layers activated with rank {args.lora_rank}")
+      logging.info(f"Number of trainable parameters in the model: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
     scheduler.step()
     lr = scheduler.get_lr()[0]
     logging.info('epoch %d lr %e', epoch, lr)
 
-    logging.info(f"current arch parameters (post softmax): {model.arch_weights}")
+    logging.info(f"current arch parameters (post softmax): {{k: F.softmax(v) for k, v in model.arch_weights.items()}}")
 
     # training
     train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
