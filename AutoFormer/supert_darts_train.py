@@ -12,27 +12,28 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torch.backends.cudnn as cudnn
 
+from timm.scheduler import create_scheduler
+from timm.optim import create_optimizer
+
 from model.supernet_transformer import Vision_TransformerSuper, wrap_entangled_modules
 
 from model import utils
 from architect import Architect
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--lora_rank', type=int, default=4, help='rank of lora layers')
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
-parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
-parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
-parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
-parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
+# parser.add_argument('--learning_rate', type=float, default=5e-4, help='init learning rate')
+# parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
+# parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
+# parser.add_argument('--weight_decay', type=float, default=0.05, help='weight decay')
 parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
-parser.add_argument('--warmup_epochs', type=int, default=2, help='num of warmup training epochs')
-parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
-parser.add_argument('--layers', type=int, default=8, help='total number of layers')
+parser.add_argument('--warmup_epochs', type=int, default=10, help='num of warmup training epochs')
 parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
 parser.add_argument('--cutout', action='store_true', default=False, help='use cutout')
 parser.add_argument('--cutout_length', type=int, default=16, help='cutout length')
@@ -44,6 +45,49 @@ parser.add_argument('--train_portion', type=float, default=0.5, help='portion of
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+
+# Optimizer parameters
+parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
+                    help='Optimizer (default: "adamw"')
+parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
+                    help='Optimizer Epsilon (default: 1e-8)')
+parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
+                    help='Optimizer Betas (default: None, use opt default)')
+parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
+                    help='Clip gradient norm (default: None, no clipping)')
+parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
+                    help='SGD momentum (default: 0.9)')
+parser.add_argument('--weight-decay', type=float, default=0.05,
+                    help='weight decay (default: 0.05)')
+
+# Learning rate schedule parameters
+parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
+                    help='LR scheduler (default: "cosine"')
+parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+                    help='learning rate (default: 5e-4)')
+parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
+                    help='learning rate noise on/off epoch percentages')
+parser.add_argument('--lr-noise-pct', type=float, default=0.67, metavar='PERCENT',
+                    help='learning rate noise limit percent (default: 0.67)')
+parser.add_argument('--lr-noise-std', type=float, default=1.0, metavar='STDDEV',
+                    help='learning rate noise std-dev (default: 1.0)')
+parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
+                    help='warmup learning rate (default: 1e-6)')
+parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+                    help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
+parser.add_argument('--lr-power', type=float, default=1.0,
+                    help='power of the polynomial lr scheduler')
+parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
+                    help='epoch interval to decay LR')
+parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
+                    help='epochs to warmup LR, if scheduler supports')
+parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
+                    help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
+parser.add_argument('--patience-epochs', type=int, default=10, metavar='N',
+                    help='patience epochs for Plateau LR scheduler (default: 10')
+parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
+                    help='LR decay rate (default: 0.1)')
+
 
 args = parser.parse_args()
 
@@ -149,11 +193,11 @@ def main():
 
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model))
 
-  optimizer = torch.optim.SGD(
-      model.parameters(),
-      args.learning_rate,
-      momentum=args.momentum,
-      weight_decay=args.weight_decay)
+  # optimizer = torch.optim.SGD(
+  #     model.parameters(),
+  #     args.learning_rate,
+  #     momentum=args.momentum,
+  #     weight_decay=args.weight_decay)
 
   train_transform, valid_transform = utils._data_transforms_cifar10(args)
   train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
@@ -172,8 +216,11 @@ def main():
       sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train]),
       pin_memory=True, num_workers=2)
 
-  scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, float(args.epochs), eta_min=args.learning_rate_min)
+
+  optimizer = create_optimizer(args, model)
+  scheduler, _ = create_scheduler(args, optimizer)
+  # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+  #       optimizer, float(args.epochs), eta_min=args.learning_rate_min)
 
   architect = Architect(model, args)
 
@@ -183,12 +230,12 @@ def main():
       logging.info('warmup done')
       model.activate_lora(args.lora_rank)
       lora_params = [p for name, p in model.named_parameters() if "lora_" in name]
-      optimizer.add_param_group({'params': lora_params, 'lr': args.learning_rate, 'weight_decay': args.weight_decay})
+      optimizer.add_param_group({'params': lora_params, 'lr': args.lr, 'weight_decay': args.weight_decay})
       logging.info(f"lora layers activated with rank {args.lora_rank}")
       logging.info(f"Number of trainable parameters in the model: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
-    scheduler.step()
-    lr = scheduler.get_lr()[0]
+    scheduler.step(epoch)
+    lr = scheduler._get_lr(epoch)
     logging.info('epoch %d lr %e', epoch, lr)
 
     logging.info(f"current arch parameters (post softmax): {{k: F.softmax(v) for k, v in model.arch_weights.items()}}")
