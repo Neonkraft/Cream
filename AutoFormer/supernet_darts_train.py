@@ -244,7 +244,7 @@ def main():
 
     # training
     start_time = time.time()
-    train_acc, train_acc_top5, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    train_acc, train_acc_top5, train_obj = train(epoch, args.warmup_epochs, train_queue, valid_queue, model, architect, criterion, optimizer, lr)
     epoch_time = time.time() - start_time
     logging.info('train_acc %f', train_acc)
 
@@ -267,7 +267,7 @@ def main():
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
 
-def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+def train(epoch, warmup_epochs, train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   objs = utils.AverageMeter()
   top1 = utils.AverageMeter()
   top5 = utils.AverageMeter()
@@ -279,12 +279,12 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input = input.cuda()
     target = target.cuda()
 
-    # get a random minibatch from the search queue with replacement
-    input_search, target_search = next(iter(valid_queue))
-    input_search = input_search.cuda()
-    target_search = target_search.cuda()
+    if epoch > warmup_epochs:
+      input_search, target_search = next(iter(valid_queue))
+      input_search = input_search.cuda()
+      target_search = target_search.cuda()
 
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
+      architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
 
     optimizer.zero_grad()
     logits = model(input)
