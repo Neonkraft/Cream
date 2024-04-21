@@ -7,3 +7,4 @@ PyYAML
 pillow
 torchvision
 opencv-python
+wandb

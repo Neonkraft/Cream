@@ -11,6 +11,7 @@ import torch.utils
 import torch.nn.functional as F
 import torchvision.datasets as dset
 import torch.backends.cudnn as cudnn
+import wandb
 
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
@@ -20,7 +21,7 @@ from model.supernet_transformer import Vision_TransformerSuper, wrap_entangled_m
 from model import utils
 from architect import Architect
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--lora_rank', type=int, default=4, help='rank of lora layers')
@@ -235,18 +236,33 @@ def main():
       logging.info(f"Number of trainable parameters in the model: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
     scheduler.step(epoch)
-    lr = scheduler._get_lr(epoch)
+    lr = scheduler._get_lr(epoch)[0]
     logging.info('epoch %d lr %e', epoch, lr)
 
-    logging.info(f"current arch parameters (post softmax): {{k: F.softmax(v) for k, v in model.arch_weights.items()}}")
+    arch_weights = {k: F.softmax(v) for k, v in model.arch_weights.items()}
+    logging.info(f"current arch parameters (post softmax): {arch_weights}")
 
     # training
-    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    start_time = time.time()
+    train_acc, train_acc_top5, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    epoch_time = time.time() - start_time
     logging.info('train_acc %f', train_acc)
 
     # validation
-    valid_acc, valid_obj = infer(valid_queue, model, criterion)
+    valid_acc, valid_acc_top5, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
+
+    wandb.log({
+        "train/acc1": train_acc,
+        "train/acc5": train_acc_top5,
+        "train/loss": train_obj,
+        "valid/acc1": valid_acc,
+        "valid/acc5": valid_acc_top5,
+        "valid/loss": valid_obj,
+        "lr": lr,
+        "epoch": epoch,
+        "epoch_time": epoch_time,
+    })
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
@@ -289,7 +305,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     if DEBUG_MODE:
       break
 
-  return top1.avg, objs.avg
+  return top1.avg, top5.avg, objs.avg
 
 
 def infer(valid_queue, model, criterion):
@@ -317,8 +333,12 @@ def infer(valid_queue, model, criterion):
     if DEBUG_MODE:
       break
 
-  return top1.avg, objs.avg
+  return top1.avg, top5.avg, objs.avg
 
 
 if __name__ == '__main__':
+  wandb.init(project='LoRA', config=args, name='AutoFormer-CF10')
+
   main()
+
+  wandb.finish()
