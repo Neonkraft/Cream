@@ -1,5 +1,5 @@
 torch==2.0
-timm==0.3.2
+timm
 scikit-image
 ptflops
 easydict
