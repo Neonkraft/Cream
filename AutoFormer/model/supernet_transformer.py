@@ -101,8 +101,15 @@ class Vision_TransformerSuper(nn.Module):
         self.n_heads_weights = n_heads_weights
         self.n_layers_weights = n_layers_weights
 
+    def normalize_arch_weights(self):
+        self.embed_dim_alphas = F.softmax(self.embed_dim_weights, dim=-1)
+        self.mlp_ratio_alphas = F.softmax(self.mlp_ratio_weights, dim=-1)
+        self.n_heads_alphas = F.softmax(self.n_heads_weights, dim=-1)
+        self.n_layers_alphas = F.softmax(self.n_layers_weights, dim=-1)
+
         for idx, block in enumerate(self.blocks):
-            block.set_arch_weights(embed_dim_weights, mlp_ratio_weights[idx], n_heads_weights[idx])
+            block.set_normalized_arch_weights(self.embed_dim_alphas, self.mlp_ratio_alphas[idx], self.n_heads_alphas[idx])
+
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -170,7 +177,7 @@ class Vision_TransformerSuper(nn.Module):
 
     def forward_features(self, x):
         B = x.shape[0] # (B, C, H, W)
-        x = self.patch_embed_super(x, self.embed_dim_weights) # (B, new_h * new_w , embed_dim)
+        x = self.patch_embed_super(x, self.embed_dim_alphas) # (B, new_h * new_w , embed_dim)
         cls_tokens = self.cls_token[..., :self.sample_embed_dim[0]].expand(B, -1, -1) # (B, 1, embed_dim)
         x = torch.cat((cls_tokens, x), dim=1) # (B, new_h * new_w + 1 , embed_dim)
         if self.abs_pos:
@@ -186,11 +193,11 @@ class Vision_TransformerSuper(nn.Module):
             if idx + 1 in self.n_layers_choices:
                 blk_outs.append(x)
 
-        x = self.compute_weighted_block_outputs(blk_outs, self.n_layers_weights)
+        x = self.compute_weighted_block_outputs(blk_outs, self.n_layers_alphas)
 
         # print(time.time()-start_time)
         if self.pre_norm:
-            x = self.norm(x, self.embed_dim_weights) # (B, new_h * new_w + 1 , embed_dim)
+            x = self.norm(x, self.embed_dim_alphas) # (B, new_h * new_w + 1 , embed_dim)
 
         if self.gp:
             return torch.mean(x[:, 1:] , dim=1)
@@ -198,8 +205,9 @@ class Vision_TransformerSuper(nn.Module):
         return x[:, 0]
 
     def forward(self, x): # (B, C, H, W)
+        self.normalize_arch_weights()
         x = self.forward_features(x) # (B, embed_dim)
-        x = self.head(x, self.embed_dim_weights) # (B, num_classes)
+        x = self.head(x, self.embed_dim_alphas) # (B, num_classes)
         return x
 
 
@@ -253,10 +261,10 @@ class TransformerEncoderLayer(nn.Module):
         self.fc2 = LinearSuper(super_in_dim=self.super_ffn_embed_dim_this_layer, super_out_dim=self.super_embed_dim)
 
 
-    def set_arch_weights(self, embed_dim_weights, mlp_ratio_weights, n_heads_weights):
-        self.embed_dim_weights = embed_dim_weights
-        self.mlp_ratio_weights = mlp_ratio_weights
-        self.attn.set_arch_weights(embed_dim_weights, n_heads_weights)
+    def set_normalized_arch_weights(self, embed_dim_weights, mlp_ratio_weights, n_heads_weights):
+        self.embed_dim_alphas = embed_dim_weights
+        self.mlp_ratio_alphas = mlp_ratio_weights
+        self.attn.set_normalized_arch_weights(self.embed_dim_alphas, n_heads_weights)
 
     def set_sample_config(self, is_identity_layer, sample_embed_dim=None, sample_mlp_ratio=None, sample_num_heads=None, sample_dropout=None, sample_attn_dropout=None, sample_out_dim=None):
 
@@ -310,9 +318,9 @@ class TransformerEncoderLayer(nn.Module):
         # start_time = time.time()
         residual = x
         x = self.maybe_layer_norm(self.ffn_layer_norm, x, before=True)
-        x = self.activation_fn(self.fc1(x, self.embed_dim_weights, self.mlp_ratio_weights))
+        x = self.activation_fn(self.fc1(x, self.embed_dim_alphas, self.mlp_ratio_alphas))
         x = F.dropout(x, p=self.sample_dropout, training=self.training)
-        x = self.fc2(x, self.embed_dim_weights, self.mlp_ratio_weights)
+        x = self.fc2(x, self.embed_dim_alphas, self.mlp_ratio_alphas)
         x = F.dropout(x, p=self.sample_dropout, training=self.training)
         if self.scale:
             x = x * (self.super_mlp_ratio / self.sample_mlp_ratio)
@@ -325,7 +333,7 @@ class TransformerEncoderLayer(nn.Module):
     def maybe_layer_norm(self, layer_norm, x, before=False, after=False):
         assert before ^ after
         if after ^ self.normalize_before:
-            return layer_norm(x, self.embed_dim_weights)
+            return layer_norm(x, self.embed_dim_alphas)
         else:
             return x
     def get_complexity(self, sequence_length):
@@ -363,10 +371,10 @@ if __name__ == "__main__":
     n_heads_choices = [1, 3, 4]
     n_layer_choices = [1, 12, 14]
 
-    embed_dim_weights = F.softmax(torch.randn(len(embed_choices)), dim=0)
-    mlp_ratio_weights = F.softmax(torch.randn(depth, len(mlp_ratio_choices)), dim=0)
-    n_heads_weights = F.softmax(torch.randn(depth, len(n_heads_choices)), dim=0)
-    n_layers_weights = F.softmax(torch.randn(len(n_layer_choices)), dim=0)
+    embed_dim_weights = torch.zeros(len(embed_choices))
+    mlp_ratio_weights = torch.zeros(depth, len(mlp_ratio_choices))
+    n_heads_weights = torch.zeros(depth, len(n_heads_choices))
+    n_layers_weights = torch.zeros(len(n_layer_choices))
 
     x = torch.randn(2, 3, 224, 224)
 

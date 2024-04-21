@@ -93,10 +93,6 @@ class WeightEntangledLoraQKV(nn.Module):
     def activate_lora(self, *args, **kwargs):
         self.qkv.activate_lora(*args, **kwargs)
 
-    # def set_arch_weights(self, embed_weights, n_heads_weights):
-    #     self.embed_weight = embed_weights
-    #     self.n_heads_weight = n_heads_weights
-
     def _compute_combined_weight(self, weight, in_feature_dims, n_head_choices, alphas, betas):
         max_out_dim, max_in_dim = self.qkv.weight.shape[0], self.qkv.weight.shape[1]
         arch_weight_matrix = torch.outer(alphas, betas)
