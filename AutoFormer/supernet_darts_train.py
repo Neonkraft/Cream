@@ -340,8 +340,8 @@ def infer(valid_queue, model, criterion):
 
 
 if __name__ == '__main__':
-  wandb.init(project='LoRA', config=args, name='AutoFormer-CF10')
+  run_name = f"AutoFormer-lorarank_{args.lora_rank}-epochs_{args.epochs}-warmup_{args.warmup_epochs}-bs_{args.batch_size}"
 
+  wandb.init(project='LoRA', config=args, name=run_name)
   main()
-
   wandb.finish()
