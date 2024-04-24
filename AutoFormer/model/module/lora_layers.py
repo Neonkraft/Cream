@@ -24,13 +24,12 @@ class LoRALayer():
     def activate_lora(
         self,
         r: int,
-        lora_alpha: int = 1,
         lora_dropout_rate: float = 0,
         merge_weights: bool = True,
     ) -> None:
         assert self.r == 0, "rank can only be changed once"
         self.r = r
-        self.lora_alpha = lora_alpha
+        self.lora_alpha = r
         self.lora_dropout = lora_dropout_rate
         self.merge_weights = merge_weights
         if lora_dropout_rate > 0.0:
