@@ -255,6 +255,7 @@ def main():
     valid_acc, valid_acc_top5, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
+
     wandb.log({
         "train/acc1": train_acc,
         "train/acc5": train_acc_top5,
@@ -267,6 +268,7 @@ def main():
         "epoch_time": epoch_time,
     })
 
+    torch.save(model.arch_weights, os.path.join(args.save, f"arch_weights_epoch_{epoch}.pth"))
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
 
