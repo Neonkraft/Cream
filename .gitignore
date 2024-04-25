@@ -13,3 +13,5 @@ backup.py
 *pdf
 *.bak*
 *.sh
+AutoFormer/logs*
+AutoFormer/search-EXP*
