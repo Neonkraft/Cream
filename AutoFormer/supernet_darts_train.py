@@ -24,6 +24,7 @@ from architect import Architect
 DEBUG_MODE = False
 
 parser = argparse.ArgumentParser("cifar")
+parser.add_argument("--dataset", type=str, default="cifar10", help="cifar10 or cifar100")
 parser.add_argument('--lora_rank', type=int, default=4, help='rank of lora layers')
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -192,7 +193,9 @@ def main():
   criterion = nn.CrossEntropyLoss()
   criterion = criterion.cuda()
 
-  model = init_supernet(img_size=32, num_classes=10, space="tiny").cuda()
+  num_classes = 10 if args.dataset == "cifar10" else 100
+
+  model = init_supernet(img_size=32, num_classes=num_classes, space="tiny").cuda()
   model._criterion = criterion
 
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model))
@@ -203,8 +206,14 @@ def main():
   #     momentum=args.momentum,
   #     weight_decay=args.weight_decay)
 
-  train_transform, valid_transform = utils._data_transforms_cifar10(args)
-  train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
+  if args.dataset == "cifar10":
+    train_transform, valid_transform = utils._data_transforms_cifar10(args)
+    train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
+  elif args.dataset == "cifar100":
+    train_transform, valid_transform = utils._data_transforms_cifar100(args)
+    train_data = dset.CIFAR100(root=args.data, train=True, download=True, transform=train_transform)
+  else:
+    raise ValueError(f"dataset {args.dataset} not recognized!")
 
   num_train = len(train_data)
   indices = list(range(num_train))
