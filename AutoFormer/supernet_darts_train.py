@@ -232,11 +232,19 @@ def main():
 
     if epoch == args.warmup_epochs:
       logging.info('warmup done')
-      model.activate_lora(args.lora_rank)
-      lora_params = [p for name, p in model.named_parameters() if "lora_" in name]
-      optimizer.add_param_group({'params': lora_params, 'lr': args.lr, 'weight_decay': args.weight_decay})
-      logging.info(f"lora layers activated with rank {args.lora_rank}")
+      logging.info(f"LoRA rank is {args.lora_rank}")
+
+      if args.lora_rank == 0:
+        logging.info("Baseline experiment - not activating LoRA layers")
+      else:
+        logging.info("Activating LoRA layers")
+        model.activate_lora(args.lora_rank)
+        lora_params = [p for name, p in model.named_parameters() if "lora_" in name]
+        optimizer.add_param_group({'params': lora_params, 'lr': args.lr, 'weight_decay': args.weight_decay})
+        logging.info(f"lora layers activated with rank {args.lora_rank}")
+
       logging.info(f"Number of trainable parameters in the model: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
 
     scheduler.step(epoch)
     lr = scheduler._get_lr(epoch)[0]
